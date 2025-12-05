@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <!-- ============================================ -->
+  <!-- META TAGS - Informations sur la page -->
+  <!-- ============================================ -->
+  
+  <meta charset="UTF-8">
+  <!-- Encodage des caractères (émojis, accents...) -->
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Responsive : adapter à la taille de l'écran -->
+  <!-- width=device-width : largeur = largeur de l'écran -->
+  <!-- initial-scale=1.0 : pas de zoom initial -->
+  
+  <meta name="description" content="Application de prise de notes rapide et simple">
+  <!-- Description pour les moteurs de recherche -->
+  
+  <meta name="theme-color" content="#6366f1">
+  <!-- Couleur de la barre d'adresse sur mobile -->
+  
+  <!-- ============================================ -->
+  <!-- TITRE ET STYLES -->
+  <!-- ============================================ -->
+  
+  <title>Daily Notes</title>
+  
+  <!-- Font Awesome pour les icônes -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Notre feuille de style -->
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+
+<body>
+  <!-- ============================================ -->
+  <!-- HEADER - En-tête de l'application -->
+  <!-- ============================================ -->
+  
+  <header class="header">
+    <div class="container">
+      <!-- Logo et titre -->
+      <h1 class="header__title">
+        <i class="fas fa-book"></i>
+        Daily Notes
+      </h1>
+      
+      <!-- Indicateur de connexion -->
+      <div class="connection-status" id="connectionStatus">
+        <i class="fas fa-wifi"></i>
+        <span>En ligne</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================ -->
+  <!-- MAIN - Contenu principal -->
+  <!-- ============================================ -->
+  
+  <main class="main">
+    <div class="container">
+      
+      <!-- ========================================== -->
+      <!-- FORMULAIRE - Créer/Modifier une note -->
+      <!-- ========================================== -->
+      
+      <section class="note-form" id="noteForm">
+        <h2 class="note-form__title">
+          <span id="formTitle">Nouvelle note</span>
+        </h2>
+        
+		<div id="alertBox" class="alert" style="display:none;">
+			<i class="fas fa-exclamation-triangle"></i>
+			<span id="alertMessage"></span>
+		</div>
+
+        <form id="form">
+
+		  <!-- Date de la note -->
+          <div class="form-group">
+            <label for="noteId" class="form-label">
+              <i class="fas fa-calendar-day"></i>
+              Date
+            </label>
+            <input 
+              type="text" 
+              id="noteId" 
+              class="form-input" 
+              placeholder="Ex: 20251127"
+              required
+              maxlength="8"
+			  minlength="8"
+			  pattern="\d{8}"
+			  title="Format : YYYYMMDD (8 chiffres)"
+            >
+          </div>
+          
+          <!-- Contenu de la note -->
+          <div class="form-group">
+            <label for="noteContent" class="form-label">
+              <i class="fas fa-align-left"></i>
+              Contenu
+            </label>
+            <textarea 
+              id="noteContent" 
+              class="form-textarea" 
+              placeholder="Écrivez votre note ici..."
+              rows="6"
+            ></textarea>
+          </div>
+
+		  <!-- Metadata -->
+          <div class="form-group">
+            <label for="noteContent" class="form-label">
+              <i class="fas fa-align-left"></i>
+              Metadata
+            </label>
+            <textarea 
+              id="noteMetadata" 
+              class="form-textarea" 
+              placeholder="Écrivez votre metadata ici..."
+              rows="2"
+            ></textarea>
+          </div>
+          
+          <!-- Tags (étiquettes) -->
+          <div class="form-group">
+            <label for="noteTags" class="form-label">
+              <i class="fas fa-tags"></i>
+              Tags
+            </label>
+            <input 
+              type="text" 
+              id="noteTags" 
+              class="form-input" 
+              placeholder="Ex: urgent, perso (séparés par des virgules)"
+            >
+            <small class="form-help">
+              Séparez les tags par des virgules
+            </small>
+          </div>
+
+		<!-- Boutons weather -->
+		<div class="form-group">
+			<label for="noteWeather" class="form-label">
+				<i class="fas fa-star"></i>
+				Weather
+			</label>
+			<div class="radio-group" style="display: flex; gap: 15px;"> 
+				<label><input type="radio" name="noteWeather" value="1"> 1</label>
+				<label><input type="radio" name="noteWeather" value="2"> 2</label>
+				<label><input type="radio" name="noteWeather" value="3"> 3</label>
+				<label><input type="radio" name="noteWeather" value="4"> 4</label>
+				<label><input type="radio" name="noteWeather" value="5"> 5</label>
+			</div>
+		</div>
+
+		<!-- Boutons mood -->
+		<div class="form-group">
+			<label for="noteMood" class="form-label">
+				<i class="fas fa-star"></i>
+				Mood
+			</label>
+			<div class="radio-group" style="display: flex; gap: 15px;"> 
+				<label><input type="radio" name="noteMood" value="1"> 1</label>
+				<label><input type="radio" name="noteMood" value="2"> 2</label>
+				<label><input type="radio" name="noteMood" value="3"> 3</label>
+				<label><input type="radio" name="noteMood" value="4"> 4</label>
+				<label><input type="radio" name="noteMood" value="5"> 5</label>
+			</div>
+		</div>
+
+		<!-- Tomorrow -->
+		<div class="form-group">
+		<label for="noteContent" class="form-label">
+			<i class="fas fa-align-left"></i>
+			Tomorrow
+		</label>
+		<textarea 
+			id="noteTomorrow" 
+			class="form-textarea" 
+			placeholder="..."
+			rows="1"
+		></textarea>
+		</div>
+          
+          <!-- Boutons d'action -->
+          <div class="form-actions">
+            <button type="submit" class="btn btn--primary" id="submitBtn">
+              <i class="fas fa-save"></i>
+              Enregistrer
+            </button>
+            
+            <!-- Bouton annuler (caché par défaut) -->
+            <button type="button" class="btn btn--secondary" id="cancelBtn" style="display: none;">
+              <i class="fas fa-times"></i>
+              Annuler
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- LISTE DES NOTES -->
+      <!-- ========================================== -->
+      
+      <section class="notes-section">
+        <div class="notes-header">
+          <h2 class="notes-header__title">
+            Mes notes
+            <span class="notes-count" id="notesCount">0</span>
+          </h2>
+          
+          <!-- Bouton refresh manuel -->
+          <button class="btn btn--icon" id="refreshBtn" title="Actualiser">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+        </div>
+        
+        <!-- Message de chargement -->
+        <div class="loading" id="loading">
+          <i class="fas fa-spinner fa-spin"></i>
+          Chargement...
+        </div>
+        
+        <!-- Message si aucune note -->
+        <div class="empty-state" id="emptyState" style="display: none;">
+          <i class="fas fa-inbox fa-3x"></i>
+          <p>Aucune note pour le moment</p>
+          <p class="empty-state__hint">Créez votre première note ci-dessus !</p>
+        </div>
+        
+        <!-- Liste des notes (générée dynamiquement) -->
+        <div class="notes-list" id="notesList">
+          <!-- Les notes seront insérées ici par JavaScript -->
+        </div>
+      </section>
+      
+    </div>
+  </main>
+
+  <!-- ============================================ -->
+  <!-- FOOTER -->
+  <!-- ============================================ -->
+  
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; 2024 Daily Notes - Apprendre en construisant</p>
+    </div>
+  </footer>
+
+  <!-- ============================================ -->
+  <!-- SCRIPTS JAVASCRIPT -->
+  <!-- ============================================ -->
+  
+  <!-- Notre application -->
+  <script src="js/db-local.js"></script>
+  <script src="js/app.js?v=47"></script>
+</body>
+</html>

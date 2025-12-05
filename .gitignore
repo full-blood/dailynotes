@@ -1,0 +1,4 @@
+*.o
+cmd.txt
+/scripts
+/scripts/*
