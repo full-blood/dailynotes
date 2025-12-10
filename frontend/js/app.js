@@ -113,6 +113,19 @@ function showToast(message, type = 'info') {
   // alert(message);
 }
 
+/**
+ * Met à jour l'indicateur de connexion
+ */
+function updateConnectionStatus() {
+  if (isOnline) {
+    elements.connectionStatus.innerHTML = '<i class="fas fa-wifi"></i> En ligne';
+    elements.connectionStatus.className = 'status-badge status-badge--online';
+  } else {
+    elements.connectionStatus.innerHTML = '<i class="fas fa-wifi-slash"></i> Hors ligne';
+    elements.connectionStatus.className = 'status-badge status-badge--offline';
+  }
+}
+
 // ============================================
 // API - COMMUNICATION AVEC LE BACKEND
 // ============================================
@@ -121,7 +134,7 @@ function showToast(message, type = 'info') {
  * Récupère toutes les notes depuis l'API
  * @returns {Promise<Array>} - Tableau de notes
  */
-async function fetchNotes() {
+async function fetchNotesFromAPI() {
   try {
     const response = await fetch(`${API_URL}/notes`);
     
@@ -145,33 +158,8 @@ async function fetchNotes() {
  * @param {Object} noteData - Données de la note {title, content, tags}
  * @returns {Promise<Object>} - Note créée avec son ID
  */
-/* async function createNote(noteData) {
-  try {
-    const response = await fetch(`${API_URL}/notes`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-        // Indique qu'on envoie du JSON
-      },
-      body: JSON.stringify(noteData)
-      // Convertit l'objet JavaScript en chaîne JSON
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Erreur HTTP: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data;
-    
-  } catch (error) {
-    console.error('❌ Erreur lors de la création:', error);
-    showToast('Impossible de créer la note', 'error');
-    throw error;
-  }
-} */
 
-  async function createNote(noteData) {
+  async function createNoteOnAPI(noteData) {
   console.log('[createNote] payload envoyé :', noteData);
 
   const response = await fetch('/api/notes', {
@@ -200,7 +188,7 @@ async function fetchNotes() {
     }
 
     throw new Error(`HTTP ${response.status} – ${text}`);
-	throw new Error(message);
+
   }
 
   return JSON.parse(text);
@@ -212,7 +200,7 @@ async function fetchNotes() {
  * @param {Object} noteData - Nouvelles données
  * @returns {Promise<Object>} - Note mise à jour
  */
-async function updateNote(id, noteData) {
+async function updateNoteOnAPI(id, noteData) {
   try {
     const response = await fetch(`${API_URL}/notes/${id}`, {
       method: 'PUT',
@@ -261,13 +249,19 @@ function hideAlert() {
  * @param {number} id - ID de la note à supprimer
  * @returns {Promise<void>}
  */
-async function deleteNote(id) {
+async function deleteNoteOnAPI(id) {
   try {
     const response = await fetch(`${API_URL}/notes/${id}`, {
       method: 'DELETE'
     });
     
     if (!response.ok) {
+      // Si la note est déjà supprimée côté serveur (404),
+      // on considère que c'est OK pour la synchro
+      if (response.status === 404) {
+        console.warn(`ℹ️ Note ${id} déjà supprimée sur le serveur (404)`);
+        return;
+      }
       throw new Error(`Erreur HTTP: ${response.status}`);
     }
     
@@ -278,6 +272,176 @@ async function deleteNote(id) {
     console.error('❌ Erreur lors de la suppression:', error);
     showToast('Impossible de supprimer la note', 'error');
     throw error;
+  }
+}
+
+
+// ============================================
+// STOCKAGE LOCAL + SYNCHRONISATION
+// ============================================
+
+/**
+ * Crée une note (local + API si online)
+ */
+async function createNote(noteData) {
+  try {
+    if (isOnline) {
+      // ONLINE : création sur le serveur
+      const createdNote = await createNoteOnAPI(noteData);
+      await dbManager.saveNote(createdNote);
+      return createdNote;
+    } else {
+      // OFFLINE : création locale + action en attente
+      const now = new Date().toISOString();
+
+      const localNote = {
+        id: noteData.id,
+        content: noteData.content,
+        metadata: noteData.metadata,
+        tags: noteData.tags,
+        weather: noteData.weather ?? null,
+        mood: noteData.mood ?? null,
+        tomorrow: noteData.tomorrow,
+        created_at: now,
+        updated_at: now,
+        _localOnly: true
+      };
+
+      await dbManager.saveNote(localNote);
+
+      await dbManager.addPendingAction({
+        type: 'CREATE',
+        noteId: localNote.id,
+        data: noteData
+      });
+
+      showToast('Note créée localement (sera synchronisée)', 'info');
+      return localNote;
+    }
+  } catch (error) {
+    console.error('❌ Erreur lors de la création:', error);
+    throw error;
+  }
+}
+
+/**
+ * Met à jour une note (local + API si online)
+ */
+async function updateNote(id, noteData) {
+  try {
+    if (isOnline) {
+      // ONLINE : mise à jour serveur
+      const updatedNote = await updateNoteOnAPI(id, noteData);
+      await dbManager.saveNote(updatedNote);
+      return updatedNote;
+    } else {
+      // OFFLINE : mise à jour locale + action en attente
+      const localNote = await dbManager.getNote(id);
+
+      if (!localNote) {
+        throw new Error('Note introuvable');
+      }
+
+      const updatedLocalNote = {
+        ...localNote,
+        ...noteData,
+        updated_at: new Date().toISOString(),
+        _localOnly: true
+      };
+
+      await dbManager.saveNote(updatedLocalNote);
+
+      await dbManager.addPendingAction({
+        type: 'UPDATE',
+        noteId: id,
+        data: noteData
+      });
+
+      showToast('Note modifiée localement (sera synchronisée)', 'info');
+      return updatedLocalNote;
+    }
+  } catch (error) {
+    console.error('❌ Erreur lors de la modification:', error);
+    throw error;
+  }
+}
+
+/**
+ * Supprime une note (local + API si online)
+ */
+async function deleteNote(id) {
+  try {
+    if (isOnline) {
+      // ONLINE : suppression serveur + locale
+      await deleteNoteOnAPI(id);
+      await dbManager.deleteNote(id);
+    } else {
+      // OFFLINE : suppression locale + action en attente
+      await dbManager.deleteNote(id);
+
+      await dbManager.addPendingAction({
+        type: 'DELETE',
+        noteId: id
+      });
+
+      showToast('Note supprimée localement (sera synchronisée)', 'info');
+    }
+  } catch (error) {
+    console.error('❌ Erreur lors de la suppression:', error);
+    throw error;
+  }
+}
+
+/**
+ * Traite les actions en attente de synchronisation
+ */
+async function processPendingActions() {
+  if (!isOnline) {
+    console.log('⏸️ Hors ligne, pas de synchronisation');
+    return;
+  }
+
+  try {
+    const pendingActions = await dbManager.getPendingActions();
+
+    if (pendingActions.length === 0) {
+      console.log('✅ Aucune action en attente');
+      return;
+    }
+
+    console.log(`🔄 Traitement de ${pendingActions.length} action(s) en attente...`);
+
+    for (const action of pendingActions) {
+      try {
+        switch (action.type) {
+          case 'CREATE': {
+            const createdNote = await createNoteOnAPI(action.data);
+            await dbManager.deleteNote(action.noteId);
+            await dbManager.saveNote(createdNote);
+            break;
+          }
+          case 'UPDATE':
+            await updateNoteOnAPI(action.noteId, action.data);
+            break;
+          case 'DELETE':
+            await deleteNoteOnAPI(action.noteId);
+            break;
+        }
+
+        await dbManager.deletePendingAction(action.localId);
+        console.log(`✅ Action ${action.type} synchronisée`);
+      } catch (error) {
+        console.error(`❌ Échec sync action ${action.type}:`, error);
+        // On ne supprime pas l'action, elle sera retentée
+      }
+    }
+
+    // Recharger les notes après la sync
+    await loadNotes();
+
+    showToast('Synchronisation terminée', 'success');
+  } catch (error) {
+    console.error('❌ Erreur traitement actions:', error);
   }
 }
 
@@ -309,6 +473,11 @@ function createNoteCardHTML(note) {
     ? tagsArray.map(tag => `<span class="tag">${tag}</span>`).join('')
     : '';
   
+  // Badge pour les notes locales en attente de sync
+  const tempBadge = note._localOnly
+    ? '<span class="tag" style="background: #f59e0b;">⏳ En attente</span>'
+    : '';
+
   // Tronquer le contenu si trop long
   const maxLength = 150;
   let displayContent = note.content || '';
@@ -322,14 +491,14 @@ function createNoteCardHTML(note) {
         <div class="note-card__actions">
           <button 
             class="btn btn--success" 
-            onclick="editNote(${note.id})"
+            onclick="editNote('${String(note.id)}')"
             title="Modifier"
           >
             <i class="fas fa-edit"></i>
           </button>
           <button 
             class="btn btn--danger" 
-            onclick="confirmDelete(${note.id})"
+            onclick="confirmDelete('${String(note.id)}')"
             title="Supprimer"
           >
             <i class="fas fa-trash"></i>
@@ -343,7 +512,8 @@ function createNoteCardHTML(note) {
       
       <div class="note-card__footer">
         <div class="note-card__tags">
-          ${tagsHTML}
+            ${tempBadge}
+            ${tagsHTML}
         </div>
         <time datetime="${note.id}">
           ${note.id}
@@ -394,17 +564,41 @@ function renderNotes() {
 }
 
 /**
- * Charge et affiche les notes depuis l'API
+ * Charge et affiche les notes depuis l'API (avec IndexedDB + offline)
  */
 async function loadNotes() {
   showLoading(true);
   
   try {
-    notes = await fetchNotes();
+    // Étape 1 : charger depuis IndexedDB
+    console.log('📦 Chargement depuis IndexedDB...');
+    notes = await dbManager.getAllNotes();
     renderNotes();
-    showToast(`${notes.length} note(s) chargée(s)`, 'success');
+    console.log(`✅ ${notes.length} note(s) chargée(s) localement`);
+
+    // Étape 2 : si online, synchroniser avec le serveur
+    if (isOnline) {
+      console.log('🔄 Synchronisation avec le serveur...');
+      try {
+        const serverNotes = await fetchNotesFromAPI();
+        await dbManager.saveNotes(serverNotes);
+        notes = await dbManager.getAllNotes();
+        renderNotes();
+        console.log(`✅ ${serverNotes.length} note(s) synchronisée(s)`);
+        showToast(`${serverNotes.length} note(s) synchronisée(s)`, 'success');
+
+        // Traiter les actions en attente
+        await processPendingActions();
+      } catch (error) {
+        console.warn('⚠️ Sync impossible, utilisation du cache local', error);
+        showToast('Mode hors ligne (cache local)', 'info');
+      }
+    } else {
+      showToast('Mode hors ligne', 'info');
+    }
   } catch (error) {
-    // L'erreur est déjà loggée dans fetchNotes()
+    console.error('❌ Erreur lors du chargement des notes:', error);
+    showToast('Erreur de chargement', 'error');
   } finally {
     showLoading(false);
   }
@@ -519,13 +713,12 @@ async function handleSubmit(e) {
   
   // Récupérer les valeurs du formulaire
   const noteData = {
-    //title: elements.noteTitle.value.trim(),
 	id: elements.id.value.trim(),
-    content: elements.noteContent.value.trim(),
+  content: elements.noteContent.value.trim(),
 	metadata: elements.noteMetadata.value.trim(),
-    tags: elements.noteTags.value.trim(),
-    weather: document.querySelector('input[name="noteWeather"]:checked')?.value,
-    mood : document.querySelector('input[name="noteMood"]:checked')?.value,
+  tags: elements.noteTags.value.trim(),
+  weather: document.querySelector('input[name="noteWeather"]:checked')?.value,
+  mood: document.querySelector('input[name="noteMood"]:checked')?.value,
 	tomorrow: elements.noteTomorrow.value.trim()
   };
   
@@ -603,6 +796,34 @@ async function handleDelete(id) {
 }
 
 // ============================================
+// GESTION ONLINE/OFFLINE
+// ============================================
+
+/**
+ * Gère le passage en mode online
+ */
+async function handleOnline() {
+  console.log('🌐 Connexion rétablie');
+  isOnline = true;
+  updateConnectionStatus();
+  showToast('Connexion rétablie - synchronisation en cours...', 'success');
+
+  // Synchroniser les modifications en attente puis recharger
+  await processPendingActions();
+  await loadNotes();
+}
+
+/**
+ * Gère le passage en mode offline
+ */
+function handleOffline() {
+  console.log('📴 Connexion perdue');
+  isOnline = false;
+  updateConnectionStatus();
+  showToast('Mode hors ligne activé', 'info');
+}
+
+// ============================================
 // EVENT LISTENERS - ÉCOUTE DES ÉVÉNEMENTS
 // ============================================
 
@@ -622,6 +843,10 @@ function initEventListeners() {
   elements.refreshBtn.addEventListener('click', () => {
     loadNotes();
   });
+
+  // Événements online/offline
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
 }
 
 // ============================================
@@ -634,16 +859,27 @@ function initEventListeners() {
 async function init() {
   console.log('🚀 Initialisation de Daily Notes...');
   
-  // 1. Initialiser les event listeners
-  initEventListeners();
+  try {
+    // Initialiser IndexedDB
+    await dbManager.init();
+
+    // Mettre à jour le statut de connexion
+    updateConnectionStatus();
   
-  // 2. Charger les notes
-  await loadNotes();
-  
-  // 3. Focus sur le premier champ
-  //elements.noteTitle.focus();
-  
-  console.log('✅ Application prête !');
+    // 1. Initialiser les event listeners
+    initEventListeners();
+    
+    // 2. Charger les notes
+    await loadNotes();
+    
+    // 3. Focus sur le premier champ
+    elements.noteContent.focus();
+    
+    console.log('✅ Application prête !');
+  } catch (error) {
+    console.error('❌ Erreur initialisation:', error);
+    showToast('Erreur critique lors du démarrage', 'error');
+  }
 }
 
 // ============================================

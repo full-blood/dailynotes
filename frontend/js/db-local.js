@@ -163,23 +163,35 @@ class DatabaseManager {
    * @param {Array} notes
    * @returns {Promise<void>}
    */
+  // Sauvegarde la liste complète des notes du serveur
+  // en remplaçant le contenu local (source de vérité = serveur)
   async saveNotes(notes) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction([NOTES_STORE], 'readwrite');
       const store = transaction.objectStore(NOTES_STORE);
 
-      // Boucle sur chaque note
-      notes.forEach(note => {
-        store.put(note);
-      });
+      // On vide d'abord le store pour enlever les anciennes notes
+      const clearRequest = store.clear();
 
-      transaction.oncomplete = () => {
-        console.log(`✓ ${notes.length} notes sauvegardées localement`);
-        resolve();
+      clearRequest.onerror = () => {
+        console.error('❌ Erreur lors du clear des notes locales:', clearRequest.error);
+        reject(clearRequest.error);
       };
 
-      transaction.onerror = () => {
-        reject(transaction.error);
+      clearRequest.onsuccess = () => {
+        // Puis on réinsère toutes les notes reçues du serveur
+        notes.forEach(note => {
+          store.put(note);
+        });
+
+        transaction.oncomplete = () => {
+          console.log(`✓ ${notes.length} notes sauvegardées localement`);
+          resolve();
+        };
+
+        transaction.onerror = () => {
+          reject(transaction.error);
+        };
       };
     });
   }
