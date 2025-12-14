@@ -17,7 +17,6 @@ let isOnline = navigator.onLine;
 // RÉFÉRENCES AUX ÉLÉMENTS DOM
 // ============================================
 
-// On stocke les références pour ne pas les chercher à chaque fois
 const elements = {
   // Formulaire
   form: document.getElementById('form'),
@@ -45,72 +44,37 @@ const elements = {
   connectionStatus: document.getElementById('connectionStatus')
 };
 
-// Vérifier que les éléments essentiels existent
-const requiredElements = ['form', 'formTitle', 'id', 'submitBtn', 'notesList'];
-const missingElements = requiredElements.filter(key => !elements[key]);
-
-if (missingElements.length > 0) {
-  console.error('❌ Éléments manquants dans le DOM:', missingElements);
-  throw new Error(`Éléments DOM manquants: ${missingElements.join(', ')}`);
-}
-
-console.log('✅ Tous les éléments DOM essentiels sont trouvés');
-
 // ============================================
 // FONCTIONS UTILITAIRES
 // ============================================
 
 /**
  * Affiche ou cache le spinner de chargement
- * @param {boolean} show - true pour afficher, false pour cacher
  */
 function showLoading(show) {
-  elements.loading.style.display = show ? 'block' : 'none';
+  if(elements.loading) elements.loading.style.display = show ? 'block' : 'none';
 }
 
 /**
  * Affiche ou cache le message "Aucune note"
- * @param {boolean} show - true pour afficher, false pour cacher
  */
 function showEmptyState(show) {
-  elements.emptyState.style.display = show ? 'block' : 'none';
+  if(elements.emptyState) elements.emptyState.style.display = show ? 'block' : 'none';
 }
 
 /**
  * Met à jour le compteur de notes
  */
 function updateNotesCount() {
-  elements.notesCount.textContent = notes.length;
-}
-
-/**
- * Formate une date ISO en format lisible
- * @param {string} isoDate - Date au format ISO (ex: 2024-01-15T10:30:00.000Z)
- * @returns {string} - Date formatée (ex: 15/01/2024 à 10:30)
- */
-function formatDate(isoDate) {
-  const date = new Date(isoDate);
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  
-  return `${day}/${month}/${year} à ${hours}:${minutes}`;
+  if(elements.notesCount) elements.notesCount.textContent = notes.length;
 }
 
 /**
  * Affiche une notification toast
- * @param {string} message - Message à afficher
- * @param {string} type - 'success', 'error', ou 'info'
  */
 function showToast(message, type = 'info') {
-  // On créera un vrai système de notification plus tard
-  // Pour l'instant, juste console.log
   console.log(`[${type.toUpperCase()}] ${message}`);
-  
-  // Vous pouvez aussi utiliser alert() temporairement
-  // alert(message);
+  // Ici on pourrait ajouter une UI de toast réelle
 }
 
 /**
@@ -126,175 +90,164 @@ function updateConnectionStatus() {
   }
 }
 
+/**
+ * Affiche une boîte d'alerte avec un message
+ */
+function showAlert(message) {
+  const box = document.getElementById('alertBox');
+  const msg = document.getElementById('alertMessage');
+  if(box && msg) {
+    msg.textContent = message;
+    box.style.display = 'flex';
+    setTimeout(() => {
+      box.style.display = 'none';
+    }, 5000);
+  } else {
+    alert(message);
+  }
+}
+
+function hideAlert() {
+  const box = document.getElementById('alertBox');
+  if(box) box.style.display = 'none';
+}
+
+// ============================================
+// SERVICE WORKER (PWA)
+// ============================================
+
+async function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      console.log('✅ Service Worker enregistré avec succès:', registration.scope);
+    } catch (error) {
+      console.error('❌ Échec de l\'enregistrement du Service Worker:', error);
+    }
+  }
+}
+
 // ============================================
 // API - COMMUNICATION AVEC LE BACKEND
 // ============================================
 
 /**
  * Récupère toutes les notes depuis l'API
- * @returns {Promise<Array>} - Tableau de notes
  */
 async function fetchNotesFromAPI() {
-  try {
-    const response = await fetch(`${API_URL}/notes`);
-    
-    // Vérifier si la requête a réussi (status 200-299)
-    if (!response.ok) {
-      throw new Error(`Erreur HTTP: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data;
-    
-  } catch (error) {
-    console.error('❌ Erreur lors de la récupération des notes:', error);
-    showToast('Impossible de charger les notes', 'error');
-    throw error;
+  const response = await fetch(`${API_URL}/notes`);
+  if (!response.ok) {
+    throw new Error(`Erreur HTTP: ${response.status}`);
   }
+  return await response.json();
 }
 
 /**
- * Crée une nouvelle note
- * @param {Object} noteData - Données de la note {title, content, tags}
- * @returns {Promise<Object>} - Note créée avec son ID
+ * Crée une nouvelle note sur l'API
  */
-
-  async function createNoteOnAPI(noteData) {
-  console.log('[createNote] payload envoyé :', noteData);
-
+async function createNoteOnAPI(noteData) {
   const response = await fetch('/api/notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(noteData),
   });
 
-  console.log('[createNote] statut :', response.status);
   const text = await response.text();
-  console.log('[createNote] réponse brute :', text);
 
   if (!response.ok) {
-	let message = "Erreur inconnue";
-	try {
+    let message = "Erreur inconnue";
+    try {
       const json = JSON.parse(text);
       message = json.error || message;
-    } catch(e) {	
-      message = text || message;
+    } catch(e) {    
+      // Si c'est du HTML (comme l'erreur 502 Cloudflare), on met un message générique
+      if (text.trim().startsWith('<')) {
+        message = `Erreur Serveur (${response.status})`;
+      } else {
+        message = text;
+      }
     }
-	// Message adapté pour le cas du doublon
     if (response.status === 409) {
-      showAlert("Une note existe déjà pour cette date. Choisissez une autre date.", "error");
+        showAlert("Une note existe déjà pour cette date. Choisissez une autre date.", "error");
     } else {
-      showAlert(message);
+        showAlert(message);
     }
-
-    throw new Error(`HTTP ${response.status} – ${text}`);
-
+    // On lance une erreur avec le statut pour pouvoir filtrer plus tard
+    const error = new Error(message);
+    error.status = response.status;
+    error.rawBody = text;
+    throw error;
   }
 
   return JSON.parse(text);
 }
 
 /**
- * Met à jour une note existante
- * @param {number} id - ID de la note
- * @param {Object} noteData - Nouvelles données
- * @returns {Promise<Object>} - Note mise à jour
+ * Met à jour une note sur l'API
  */
 async function updateNoteOnAPI(id, noteData) {
-  try {
-    const response = await fetch(`${API_URL}/notes/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(noteData)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Erreur HTTP: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data;
-    
-  } catch (error) {
-    console.error('❌ Erreur lors de la modification:', error);
-    showToast('Impossible de modifier la note', 'error');
+  const response = await fetch(`${API_URL}/notes/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(noteData)
+  });
+  
+  if (!response.ok) {
+    const error = new Error(`Erreur HTTP: ${response.status}`);
+    error.status = response.status;
     throw error;
   }
+  
+  return await response.json();
 }
-
-/** Affiche une boîte d'alerte avec un message*/
-function showAlert(message) {
-  const box = document.getElementById('alertBox');
-  const msg = document.getElementById('alertMessage');
-
-  msg.textContent = message;
-  box.style.display = 'flex';
-
-  // Auto-hide après 5 secondes (optionnel)
-  setTimeout(() => {
-    box.style.display = 'none';
-  }, 5000);
-}
-
-function hideAlert() {
-  const box = document.getElementById('alertBox');
-  box.style.display = 'none';
-}
-
 
 /**
- * Supprime une note
- * @param {number} id - ID de la note à supprimer
- * @returns {Promise<void>}
+ * Supprime une note sur l'API
  */
 async function deleteNoteOnAPI(id) {
-  try {
-    const response = await fetch(`${API_URL}/notes/${id}`, {
-      method: 'DELETE'
-    });
-    
-    if (!response.ok) {
-      // Si la note est déjà supprimée côté serveur (404),
-      // on considère que c'est OK pour la synchro
-      if (response.status === 404) {
-        console.warn(`ℹ️ Note ${id} déjà supprimée sur le serveur (404)`);
-        return;
-      }
-      throw new Error(`Erreur HTTP: ${response.status}`);
-    }
-    
-    // DELETE renvoie 204 No Content (pas de body)
-    return;
-    
-  } catch (error) {
-    console.error('❌ Erreur lors de la suppression:', error);
-    showToast('Impossible de supprimer la note', 'error');
+  const response = await fetch(`${API_URL}/notes/${id}`, {
+    method: 'DELETE'
+  });
+  
+  if (!response.ok) {
+    if (response.status === 404) return; // Déjà supprimé
+    const error = new Error(`Erreur HTTP: ${response.status}`);
+    error.status = response.status;
     throw error;
   }
 }
 
-
 // ============================================
-// STOCKAGE LOCAL + SYNCHRONISATION
+// LOGIQUE PRINCIPALE (Local + API)
 // ============================================
 
 /**
- * Crée une note (local + API si online)
+ * Crée une note (avec bascule automatique offline)
  */
 async function createNote(noteData) {
-  try {
-    if (isOnline) {
-      // ONLINE : création sur le serveur
+  // 1. Essayer l'API si on pense être en ligne
+  if (isOnline) {
+    try {
       const createdNote = await createNoteOnAPI(noteData);
       await dbManager.saveNote(createdNote);
       return createdNote;
-    } else {
-      // OFFLINE : création locale + action en attente
-      const now = new Date().toISOString();
+    } catch (error) {
+      // Si c'est une erreur de validation (ex: ID manquant, doublon), on arrête tout
+      if (error.status === 400 || error.status === 409) {
+        console.error('❌ Erreur de validation lors de la création:', error);
+        // On NE tombe PAS en offline : on considère que la note est invalide
+        throw error;
+      }
+      
+      console.warn('⚠️ API indisponible (Serveur éteint ou erreur réseau), passage en mode local.', error);
+      // Pour les erreurs 5xx (Serveur) ou réseau, on continue vers le mode hors ligne
+    }
+  }
 
-      const localNote = {
+  // 2. Mode Hors Ligne (ou Fallback si API échoue)
+  try {
+    const now = new Date().toISOString();
+    const localNote = {
         id: noteData.id,
         content: noteData.content,
         metadata: noteData.metadata,
@@ -304,122 +257,117 @@ async function createNote(noteData) {
         tomorrow: noteData.tomorrow,
         created_at: now,
         updated_at: now,
-        _localOnly: true
-      };
+        _localOnly: true // Marqueur pour dire "pas encore sync"
+    };
 
-      await dbManager.saveNote(localNote);
+    await dbManager.saveNote(localNote);
 
-      await dbManager.addPendingAction({
+    await dbManager.addPendingAction({
         type: 'CREATE',
         noteId: localNote.id,
         data: noteData
-      });
+    });
 
-      showToast('Note créée localement (sera synchronisée)', 'info');
-      return localNote;
-    }
+    showToast('Note créée localement (sera synchronisée)', 'info');
+    return localNote;
   } catch (error) {
-    console.error('❌ Erreur lors de la création:', error);
+        console.error('❌ Erreur lors de la création (mode local):', error);
     throw error;
   }
 }
 
 /**
- * Met à jour une note (local + API si online)
+ * Met à jour une note
  */
 async function updateNote(id, noteData) {
-  try {
-    if (isOnline) {
-      // ONLINE : mise à jour serveur
+  if (isOnline) {
+    try {
       const updatedNote = await updateNoteOnAPI(id, noteData);
       await dbManager.saveNote(updatedNote);
       return updatedNote;
-    } else {
-      // OFFLINE : mise à jour locale + action en attente
-      const localNote = await dbManager.getNote(id);
-
-      if (!localNote) {
-        throw new Error('Note introuvable');
+    } catch (error) {
+      if (error.status === 400) {
+        showAlert(error.message);
+        throw error;
       }
-
-      const updatedLocalNote = {
-        ...localNote,
-        ...noteData,
-        updated_at: new Date().toISOString(),
-        _localOnly: true
-      };
-
-      await dbManager.saveNote(updatedLocalNote);
-
-      await dbManager.addPendingAction({
-        type: 'UPDATE',
-        noteId: id,
-        data: noteData
-      });
-
-      showToast('Note modifiée localement (sera synchronisée)', 'info');
-      return updatedLocalNote;
+      console.warn('⚠️ API indisponible, modification locale.', error);
     }
-  } catch (error) {
-    console.error('❌ Erreur lors de la modification:', error);
-    throw error;
   }
+
+  // Mode Hors Ligne / Fallback
+  const localNote = await dbManager.getNote(id);
+  if (!localNote) throw new Error('Note introuvable localement');
+
+  const updatedLocalNote = {
+    ...localNote,
+    ...noteData,
+    updated_at: new Date().toISOString(),
+    _localOnly: true
+  };
+
+  await dbManager.saveNote(updatedLocalNote);
+
+  await dbManager.addPendingAction({
+    type: 'UPDATE',
+    noteId: id,
+    data: noteData
+  });
+
+  showToast('Note modifiée localement', 'info');
+  return updatedLocalNote;
 }
 
 /**
- * Supprime une note (local + API si online)
+ * Supprime une note
  */
 async function deleteNote(id) {
-  try {
-    if (isOnline) {
-      // ONLINE : suppression serveur + locale
+  if (isOnline) {
+    try {
       await deleteNoteOnAPI(id);
       await dbManager.deleteNote(id);
-    } else {
-      // OFFLINE : suppression locale + action en attente
-      await dbManager.deleteNote(id);
-
-      await dbManager.addPendingAction({
-        type: 'DELETE',
-        noteId: id
-      });
-
-      showToast('Note supprimée localement (sera synchronisée)', 'info');
+      return;
+    } catch (error) {
+      console.warn('⚠️ API indisponible, suppression locale.', error);
     }
-  } catch (error) {
-    console.error('❌ Erreur lors de la suppression:', error);
-    throw error;
   }
+
+  // Mode Hors Ligne / Fallback
+  await dbManager.deleteNote(id);
+
+  await dbManager.addPendingAction({
+    type: 'DELETE',
+    noteId: id
+  });
+
+  showToast('Note supprimée localement', 'info');
 }
 
 /**
- * Traite les actions en attente de synchronisation
+ * Synchronisation des actions en attente
  */
 async function processPendingActions() {
-  if (!isOnline) {
-    console.log('⏸️ Hors ligne, pas de synchronisation');
-    return;
-  }
+  if (!isOnline) return;
 
   try {
     const pendingActions = await dbManager.getPendingActions();
+    if (pendingActions.length === 0) return;
 
-    if (pendingActions.length === 0) {
-      console.log('✅ Aucune action en attente');
-      return;
-    }
-
-    console.log(`🔄 Traitement de ${pendingActions.length} action(s) en attente...`);
+    console.log(`🔄 Sync: ${pendingActions.length} action(s) en attente...`);
 
     for (const action of pendingActions) {
       try {
         switch (action.type) {
-          case 'CREATE': {
-            const createdNote = await createNoteOnAPI(action.data);
-            await dbManager.deleteNote(action.noteId);
-            await dbManager.saveNote(createdNote);
+          case 'CREATE':
+            // On vérifie d'abord si la note n'existe pas déjà sur le serveur
+            try {
+              const created = await createNoteOnAPI(action.data);
+              await dbManager.saveNote(created);
+            } catch(e) {
+              // Si conflit (409), on suppose qu'elle est déjà là, on ignore
+              if(e.status !== 409) throw e;
+            }
+            // On supprime le flag _localOnly si présent en rechargeant ou écrasant
             break;
-          }
           case 'UPDATE':
             await updateNoteOnAPI(action.noteId, action.data);
             break;
@@ -427,21 +375,18 @@ async function processPendingActions() {
             await deleteNoteOnAPI(action.noteId);
             break;
         }
-
         await dbManager.deletePendingAction(action.localId);
-        console.log(`✅ Action ${action.type} synchronisée`);
       } catch (error) {
         console.error(`❌ Échec sync action ${action.type}:`, error);
-        // On ne supprime pas l'action, elle sera retentée
+        // On laisse l'action dans la file pour réessayer plus tard
       }
     }
-
-    // Recharger les notes après la sync
+    
+    // Rafraîchir tout après sync
     await loadNotes();
-
     showToast('Synchronisation terminée', 'success');
   } catch (error) {
-    console.error('❌ Erreur traitement actions:', error);
+    console.error('❌ Erreur globale sync:', error);
   }
 }
 
@@ -449,99 +394,71 @@ async function processPendingActions() {
 // RENDU - AFFICHAGE DES NOTES
 // ============================================
 
-/**
- * Crée le HTML d'une carte de note
- * @param {Object} note - Objet note
- * @returns {string} - HTML de la carte
- */
 function createNoteCardHTML(note) {
-  // Nettoyer les tags (supprimer les guillemets parasites)
   let tagsString = note.tags || '';
-
-  // Supprimer les guillemets JSON si présents
   if (tagsString.startsWith('"') && tagsString.endsWith('"')) {
-    tagsString = tagsString.slice(1, -1); // Enlever premier et dernier caractère
+    tagsString = tagsString.slice(1, -1);
   }  
-
-  // Séparer les tags (chaîne -> tableau)
   const tagsArray = tagsString 
     ? tagsString.split(',').map(tag => tag.trim()).filter(tag => tag)
     : [];
   
-  // Générer le HTML des tags
   const tagsHTML = tagsArray.length > 0
     ? tagsArray.map(tag => `<span class="tag">${tag}</span>`).join('')
     : '';
   
-  // Badge pour les notes locales en attente de sync
   const tempBadge = note._localOnly
     ? '<span class="tag" style="background: #f59e0b;">⏳ En attente</span>'
     : '';
 
-  // Tronquer le contenu si trop long
   const maxLength = 150;
   let displayContent = note.content || '';
   if (displayContent.length > maxLength) {
     displayContent = displayContent.substring(0, maxLength) + '...';
   }
   
+  // Échappement basique pour la sécurité
+  const safeContent = displayContent.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   return `
     <div class="note-card" data-id="${note.id}">
       <div class="note-card__header">
+        <h3 class="note-card__title">${note.id}</h3>
         <div class="note-card__actions">
-          <button 
-            class="btn btn--success" 
-            onclick="editNote('${String(note.id)}')"
-            title="Modifier"
-          >
+          <button class="btn btn--success" onclick="editNote('${note.id}')" title="Modifier">
             <i class="fas fa-edit"></i>
           </button>
-          <button 
-            class="btn btn--danger" 
-            onclick="confirmDelete('${String(note.id)}')"
-            title="Supprimer"
-          >
+          <button class="btn btn--danger" onclick="confirmDelete('${note.id}')" title="Supprimer">
             <i class="fas fa-trash"></i>
           </button>
         </div>
       </div>
       
-      ${displayContent ? `
-        <div class="note-card__content">${escapeHTML(displayContent)}</div>
-      ` : ''}
+      ${safeContent ? `<div class="note-card__content">${safeContent}</div>` : ''}
       
       <div class="note-card__footer">
         <div class="note-card__tags">
             ${tempBadge}
             ${tagsHTML}
         </div>
-        <time datetime="${note.id}">
-          ${note.id}
-        </time>
+        <time>${formatDate(note.updated_at || note.created_at)}</time>
       </div>
     </div>
   `;
 }
 
-/**
- * Échappe les caractères HTML pour éviter les failles XSS
- * @param {string} text - Texte à échapper
- * @returns {string} - Texte sécurisé
- */
-function escapeHTML(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+function formatDate(isoDate) {
+  if(!isoDate) return '';
+  const date = new Date(isoDate);
+  return date.toLocaleDateString('fr-FR', { 
+    day: '2-digit', month: '2-digit', year: 'numeric', 
+    hour: '2-digit', minute: '2-digit' 
+  });
 }
 
-/**
- * Affiche toutes les notes dans le DOM
- */
 function renderNotes() {
-  // Vider la liste actuelle
   elements.notesList.innerHTML = '';
   
-  // Si aucune note
   if (notes.length === 0) {
     showEmptyState(true);
     updateNotesCount();
@@ -550,12 +467,11 @@ function renderNotes() {
   
   showEmptyState(false);
   
-  // Trier les notes : les plus récentes en premier
+  // Tri par date de mise à jour (plus récent en premier)
   const sortedNotes = [...notes].sort((a, b) => {
-    return new Date(b.created_at) - new Date(a.created_at);
+    return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
   });
   
-  // Créer le HTML de chaque note
   sortedNotes.forEach(note => {
     elements.notesList.insertAdjacentHTML('beforeend', createNoteCardHTML(note));
   });
@@ -563,41 +479,29 @@ function renderNotes() {
   updateNotesCount();
 }
 
-/**
- * Charge et affiche les notes depuis l'API (avec IndexedDB + offline)
- */
 async function loadNotes() {
   showLoading(true);
-  
   try {
-    // Étape 1 : charger depuis IndexedDB
-    console.log('📦 Chargement depuis IndexedDB...');
+    // 1. Charger depuis le cache local (rapide)
     notes = await dbManager.getAllNotes();
     renderNotes();
-    console.log(`✅ ${notes.length} note(s) chargée(s) localement`);
 
-    // Étape 2 : si online, synchroniser avec le serveur
+    // 2. Si on est en ligne, on tente de rafraîchir depuis le serveur
     if (isOnline) {
-      console.log('🔄 Synchronisation avec le serveur...');
       try {
         const serverNotes = await fetchNotesFromAPI();
         await dbManager.saveNotes(serverNotes);
+        // Recharger depuis la DB locale mise à jour
         notes = await dbManager.getAllNotes();
         renderNotes();
-        console.log(`✅ ${serverNotes.length} note(s) synchronisée(s)`);
-        showToast(`${serverNotes.length} note(s) synchronisée(s)`, 'success');
-
-        // Traiter les actions en attente
-        await processPendingActions();
+        // Lancer la sync des actions en attente
+        processPendingActions();
       } catch (error) {
-        console.warn('⚠️ Sync impossible, utilisation du cache local', error);
-        showToast('Mode hors ligne (cache local)', 'info');
+        console.warn('⚠️ Impossible de joindre le serveur, affichage cache local.');
       }
-    } else {
-      showToast('Mode hors ligne', 'info');
     }
   } catch (error) {
-    console.error('❌ Erreur lors du chargement des notes:', error);
+    console.error('❌ Erreur chargement notes:', error);
     showToast('Erreur de chargement', 'error');
   } finally {
     showLoading(false);
@@ -605,148 +509,96 @@ async function loadNotes() {
 }
 
 // ============================================
-// FORMULAIRE - CRÉATION/ÉDITION
+// FORMULAIRE
 // ============================================
 
-/**
- * Réinitialise le formulaire en mode "création"
- */
 function resetForm() {
-  elements.form.reset();              // Vide tous les champs
-  elements.id.value = '';         // Pas d'ID = mode création
-  currentEditId = null;
+  elements.form.reset();
+  elements.id.value = '';
+  // Déverrouiller le champ ID
+  elements.id.readOnly = false;
   
-  // Interface
+  currentEditId = null;
   elements.formTitle.textContent = 'Nouvelle note';
   elements.submitBtn.innerHTML = '<i class="fas fa-save"></i> Enregistrer';
   elements.cancelBtn.style.display = 'none';
-  
-  hideAlert();//cache l'alerte doublons.f
-  // Focus sur le premier champ
-  //elements.noteTitle.focus();
+  hideAlert();
 }
 
-//nettoie les tags pour l'affichage dans le formulaire
 function cleanTagsForInput(tags) {
   if (!tags) return '';
-
   let t = String(tags).trim();
-
-  // Si c'est du JSON (ex: '["tag1","tag2"]'), on essaie de parser
   if ((t.startsWith('[') && t.endsWith(']')) || t.includes('","')) {
     try {
       const arr = JSON.parse(t);
-      if (Array.isArray(arr)) {
-        return arr.join(', ');
-      }
-    } catch (e) {
-      // on ignore l'erreur, on tombera sur le nettoyage simple plus bas
-    }
+      if (Array.isArray(arr)) return arr.join(', ');
+    } catch (e) {}
   }
-
-  // Si la chaîne est entourée de guillemets ("tag1, tag2")
-  if (
-    (t.startsWith('"') && t.endsWith('"')) ||
-    (t.startsWith("'") && t.endsWith("'"))
-  ) {
-    t = t.slice(1, -1).trim();
-  }
-
+  if ((t.startsWith('"') && t.endsWith('"'))) t = t.slice(1, -1).trim();
   return t;
 }
 
-/**
- * Passe le formulaire en mode "édition"
- * @param {number} id - ID de la note à éditer
- */
 function editNote(id) {
-  // Trouver la note dans le tableau
   const note = notes.find(n => String(n.id) === String(id));
+  if (!note) return;
   
-  if (!note) {
-    alert('Note introuvable', 'error');
-    return;
-  }
-  
-  // Remplir le formulaire
   elements.id.value = note.id;
+  // Verrouiller l'ID en édition pour ne pas le changer
+  elements.id.readOnly = true;
+  
   elements.noteContent.value = note.content || '';
   elements.noteMetadata.value = note.metadata || '';
   elements.noteTags.value = cleanTagsForInput(note.tags || '');
-  elements.noteWeather.value = note.weather ||'';
-  elements.noteMood.value = note.mood || '';
   elements.noteTomorrow.value = note.tomorrow || '';
 
-
-	// ✅ Cocher le bon bouton "weather"
-	const weatherValue = note.weather != null ? String(note.weather) : null;
-	document.querySelectorAll('input[name="noteWeather"]').forEach(input => {
-		input.checked = weatherValue !== null && String(input.value) === weatherValue;
-	});
-
-	// ✅ Cocher le bon bouton "mood"
-	const moodValue = note.mood != null ? String(note.mood) : null;
-	document.querySelectorAll('input[name="noteMood"]').forEach(input => {
-		input.checked = moodValue !== null && String(input.value) === moodValue;
-	});
+  if (note.weather) {
+    const wRadio = document.querySelector(`input[name="noteWeather"][value="${note.weather}"]`);
+    if(wRadio) wRadio.checked = true;
+  }
+  
+  if (note.mood) {
+    const mRadio = document.querySelector(`input[name="noteMood"][value="${note.mood}"]`);
+    if(mRadio) mRadio.checked = true;
+  }
 
   currentEditId = note.id;
-  
-  // Interface
   elements.formTitle.textContent = 'Modifier la note';
   elements.submitBtn.innerHTML = '<i class="fas fa-save"></i> Mettre à jour';
   elements.cancelBtn.style.display = 'inline-flex';
   
-  // Scroller vers le formulaire
   elements.form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  
-  // Focus sur le titre
-  elements.noteContent.focus();
 }
 
-/**
- * Gère la soumission du formulaire (création ou modification)
- * @param {Event} e - Événement de soumission
- */
 async function handleSubmit(e) {
-  e.preventDefault();  // Empêche le rechargement de la page
+  e.preventDefault();
   
-  // Récupérer les valeurs du formulaire
   const noteData = {
-	id: elements.id.value.trim(),
-  content: elements.noteContent.value.trim(),
-	metadata: elements.noteMetadata.value.trim(),
-  tags: elements.noteTags.value.trim(),
-  weather: document.querySelector('input[name="noteWeather"]:checked')?.value,
-  mood: document.querySelector('input[name="noteMood"]:checked')?.value,
-	tomorrow: elements.noteTomorrow.value.trim()
+    id: elements.id.value.trim(),
+    content: elements.noteContent.value.trim(),
+    metadata: elements.noteMetadata.value.trim(),
+    tags: elements.noteTags.value.trim(),
+    weather: document.querySelector('input[name="noteWeather"]:checked')?.value,
+    mood: document.querySelector('input[name="noteMood"]:checked')?.value,
+    tomorrow: elements.noteTomorrow.value.trim()
   };
   
-  // Désactiver le bouton pendant l'envoi
   elements.submitBtn.disabled = true;
-  elements.submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...';
+  elements.submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Traitement...';
   
   try {
     if (currentEditId) {
-      // MODE ÉDITION
       await updateNote(currentEditId, noteData);
-      showToast('Note modifiée avec succès', 'success');
+      showToast('Modification enregistrée', 'success');
     } else {
-      // MODE CRÉATION
       await createNote(noteData);
-      showToast('Note créée avec succès', 'success');
+      showToast('Note créée', 'success');
     }
-    
-    // Recharger les notes
     await loadNotes();
-    
-    // Réinitialiser le formulaire
     resetForm();
-    
   } catch (error) {
-    // L'erreur est déjà gérée dans createNote()/updateNote()
+    // Erreur déjà gérée dans les fonctions (alert ou console)
+    console.error(error);
   } finally {
-    // Réactiver le bouton
     elements.submitBtn.disabled = false;
     elements.submitBtn.innerHTML = currentEditId 
       ? '<i class="fas fa-save"></i> Mettre à jour'
@@ -754,146 +606,75 @@ async function handleSubmit(e) {
   }
 }
 
-/**
- * Demande confirmation avant de supprimer
- * @param {number} id - ID de la note à supprimer
- */
 function confirmDelete(id) {
-  const note = notes.find(n => String(n.id) === String(id));
-  
-  if (!note) return;
-  
-  // Utiliser confirm() pour l'instant (on fera mieux plus tard)
-  const confirmed = confirm(
-    `Êtes-vous sûr de vouloir supprimer la note du :\n\n"${note.id}" ?`
-  );
-  
-  if (confirmed) {
+  if (confirm(`Supprimer la note "${id}" ?`)) {
     handleDelete(id);
   }
 }
 
-/**
- * Supprime une note
- * @param {number} id - ID de la note à supprimer
- */
 async function handleDelete(id) {
   try {
     await deleteNote(id);
-    showToast('Note supprimée', 'success');
-    
-    // Si on était en train d'éditer cette note, reset le formulaire
-    if (currentEditId === id) {
-      resetForm();
-    }
-    
-    // Recharger les notes
+    if (currentEditId === id) resetForm();
     await loadNotes();
-    
   } catch (error) {
-    // L'erreur est déjà gérée dans deleteNote()
+    console.error(error);
   }
 }
 
 // ============================================
-// GESTION ONLINE/OFFLINE
+// GESTION CONNECTIVITÉ
 // ============================================
 
-/**
- * Gère le passage en mode online
- */
-async function handleOnline() {
-  console.log('🌐 Connexion rétablie');
+function handleOnline() {
   isOnline = true;
   updateConnectionStatus();
-  showToast('Connexion rétablie - synchronisation en cours...', 'success');
-
-  // Synchroniser les modifications en attente puis recharger
-  await processPendingActions();
-  await loadNotes();
+  showToast('Connexion rétablie', 'success');
+  processPendingActions();
 }
 
-/**
- * Gère le passage en mode offline
- */
 function handleOffline() {
-  console.log('📴 Connexion perdue');
   isOnline = false;
   updateConnectionStatus();
-  showToast('Mode hors ligne activé', 'info');
+  showToast('Mode hors ligne', 'info');
 }
 
 // ============================================
-// EVENT LISTENERS - ÉCOUTE DES ÉVÉNEMENTS
+// INITIALISATION
 // ============================================
 
-/**
- * Initialise tous les écouteurs d'événements
- */
-function initEventListeners() {
-  // Soumission du formulaire
-  elements.form.addEventListener('submit', handleSubmit);
-  
-  // Bouton annuler
-  elements.cancelBtn.addEventListener('click', () => {
-    resetForm();
-  });
-  
-  // Bouton refresh
-  elements.refreshBtn.addEventListener('click', () => {
-    loadNotes();
-  });
-
-  // Événements online/offline
-  window.addEventListener('online', handleOnline);
-  window.addEventListener('offline', handleOffline);
-}
-
-// ============================================
-// INITIALISATION - POINT D'ENTRÉE
-// ============================================
-
-/**
- * Fonction principale appelée au chargement de la page
- */
 async function init() {
-  console.log('🚀 Initialisation de Daily Notes...');
+  console.log('🚀 Démarrage...');
   
-  try {
-    // Initialiser IndexedDB
-    await dbManager.init();
+  // 1. Enregistrer le Service Worker (CRUCIAL pour PWA et icônes)
+  await registerServiceWorker();
 
-    // Mettre à jour le statut de connexion
+  try {
+    await dbManager.init();
     updateConnectionStatus();
-  
-    // 1. Initialiser les event listeners
-    initEventListeners();
     
-    // 2. Charger les notes
+    // Listeners
+    elements.form.addEventListener('submit', handleSubmit);
+    elements.cancelBtn.addEventListener('click', resetForm);
+    elements.refreshBtn.addEventListener('click', loadNotes);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    // Chargement initial
     await loadNotes();
     
-    // 3. Focus sur le premier champ
-    elements.noteContent.focus();
-    
-    console.log('✅ Application prête !');
   } catch (error) {
-    console.error('❌ Erreur initialisation:', error);
-    showToast('Erreur critique lors du démarrage', 'error');
+    console.error('Erreur init:', error);
   }
 }
 
-// ============================================
-// DÉMARRAGE
-// ============================================
-
-// Attendre que le DOM soit complètement chargé
+// Démarrage
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
-  // Le DOM est déjà chargé
   init();
 }
 
-// Exposer les fonctions globalement pour les onclick dans le HTML
+// Exports globaux
 window.editNote = editNote;
 window.confirmDelete = confirmDelete;
